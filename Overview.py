@@ -21,6 +21,22 @@ div[data-testid="stMetric"] > div { padding: 6px 10px; }
 
 st.title("🎬 IMDb Explorer")
 
+
+from pathlib import Path
+import streamlit as st
+
+BASE = Path(__file__).resolve().parent
+out_dir = BASE / "out"
+
+st.write("📂 BASE folder:", BASE)
+st.write("📂 out/ exists:", out_dir.exists())
+
+if out_dir.exists():
+    files = [(p.name, p.stat().st_size) for p in out_dir.iterdir()]
+    st.write("📄 Files in out/:", files)
+
+
+
 # ----------------- Load data -----------------
 df = load_movies()
 titles = titles_table(df)  # one row per title; handy for KPIs if needed
