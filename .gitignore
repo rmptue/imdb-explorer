@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+.env
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Streamlit cache
+.streamlit/secrets.toml
+**/.streamlit/cache/**
+
+# Data downloads (keep out/ because app needs the small parquet files)
+data/
