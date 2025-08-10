@@ -159,27 +159,47 @@ movies_exp.to_parquet(out_path, index=False)
 print(f"\nSaved: {out_path.resolve()}")
 print(f"Rows: {len(movies_exp):,} | Unique titles: {movies_exp['tconst'].nunique():,}")
 
-# ---------- Pre-aggregations (fast charts) ----------
-print("\nBuilding pre-aggregations...")
+# ---------- Pre‑aggregations (year/decade × genre) ----------
+print("\nBuilding pre‑aggregations...")
 
-def agg_template(df: pd.DataFrame, time_col: str) -> pd.DataFrame:
-    g = (
-        df.dropna(subset=["genre"])
-          .groupby([time_col, "genre"])
-          .agg(
-              n_titles=("tconst", "nunique"),
-              avg_rating=("averageRating", "mean"),
-              total_votes=("numVotes", "sum"),
-          )
-          .reset_index()
-          .rename(columns={time_col: "time"})
-          .sort_values(["time","genre"])
-    )
-    return g
+# Year × Genre
+agg_year = (
+    movies_exp.dropna(subset=["genre"])
+      .groupby(["startYear", "genre"])
+      .agg(
+          count=("tconst", "nunique"),
+          avg_rating=("averageRating", "mean"),
+          total_votes=("numVotes", "sum"),
+      )
+      .reset_index()
+      .rename(columns={"startYear": "year"})
+      .sort_values(["year", "genre"])
+)
 
-agg_year  = agg_template(movies_exp.assign(time=movies_exp["startYear"].astype("Int64")), "time")
-agg_dec   = agg_template(movies_exp.assign(time=movies_exp["decade"].astype("Int64")), "time")
+# Decade × Genre
+agg_dec = (
+    movies_exp.dropna(subset=["genre"])
+      .groupby(["decade", "genre"])
+      .agg(
+          count=("tconst", "nunique"),
+          avg_rating=("averageRating", "mean"),
+          total_votes=("numVotes", "sum"),
+      )
+      .reset_index()
+      .sort_values(["decade", "genre"])
+)
 
+# Dtypes (optional)
+agg_year["year"] = agg_year["year"].astype("Int64")
+agg_dec["decade"] = agg_dec["decade"].astype("Int64")
+agg_year["count"] = agg_year["count"].astype("int32")
+agg_dec["count"] = agg_dec["count"].astype("int32")
+agg_year["total_votes"] = agg_year["total_votes"].astype("int64")
+agg_dec["total_votes"] = agg_dec["total_votes"].astype("int64")
+agg_year["avg_rating"] = agg_year["avg_rating"].astype("float32")
+agg_dec["avg_rating"] = agg_dec["avg_rating"].astype("float32")
+
+# Save
 agg_year_path = OUT / "agg_year_genre.parquet"
 agg_dec_path  = OUT / "agg_decade_genre.parquet"
 agg_year.to_parquet(agg_year_path, index=False)
