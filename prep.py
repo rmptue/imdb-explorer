@@ -2,34 +2,30 @@
 # Build a clean, analysis-ready movies table from IMDb TSVs
 # Works with .tsv or .tsv.gz inside ./data
 # Outputs:
-#   out/movies_clean.parquet          (exploded by genre)
-#   out/collabs_edges.parquet         (tconst, director, actor)
-#   out/agg_year_genre.parquet        (per-year × genre rollup)
-#   out/agg_decade_genre.parquet      (per-decade × genre rollup)
+#   out/movies_clean.parquet             (exploded by genre)
+#   out/collabs_edges.parquet            (tconst, director, actor)
+#   out/agg_year_genre.parquet           (year, genre, count, avg_rating, total_votes)
+#   out/agg_decade_genre.parquet         (decade, genre, count, avg_rating, total_votes)
 
 from pathlib import Path
 import pandas as pd
 import numpy as np
 
 # ---------- Config ----------
-# Move all filtering to the app: keep everything here.
 MIN_VOTES = 0
-
-# Treat clearly extreme runtimes as missing (so they don’t distort charts)
 RUNTIME_MIN = 1
 RUNTIME_MAX = 300
 
-# Optional: simple genre canonicalization map (extend as needed)
 GENRE_MAP = {
     "Sci-Fi": "Sci-Fi",
     "Science Fiction": "Sci-Fi",
     "Film-Noir": "Film-Noir",
     "Noir": "Film-Noir",
-    "Rom-Com": "Romance",  # example normalization
+    "Rom-Com": "Romance",
 }
 
 # ---------- Paths ----------
-DATA = Path("data")                 # folder with IMDb TSVs
+DATA = Path("data")
 OUT = Path("out"); OUT.mkdir(exist_ok=True)
 
 # ---------- Helpers ----------
@@ -60,10 +56,6 @@ def read_tsv(stem: str, usecols=None, dtype=None) -> pd.DataFrame:
     )
 
 def canonicalize_genres(s: pd.Series) -> pd.Series:
-    """
-    Trim spaces, unify commas, and apply simple mappings per token.
-    Keeps original tokens when no mapping is found.
-    """
     s = s.fillna("").str.strip()
     s = s.str.replace(r"\s*,\s*", ",", regex=True)
     def fix_line(line: str) -> str:
@@ -74,7 +66,6 @@ def canonicalize_genres(s: pd.Series) -> pd.Series:
     return s.map(fix_line)
 
 # ---------- Load ----------
-# title.basics
 basics = read_tsv(
     "title.basics",
     usecols=REQUIRED["title.basics"],
@@ -84,41 +75,27 @@ basics = read_tsv(
     }
 )
 
-# Keep movies only
 movies = basics[basics["titleType"] == "movie"].copy()
-
-# Clean basic types
 movies["startYear"] = pd.to_numeric(movies["startYear"], errors="coerce").astype("Int64")
-movies["endYear"] = pd.to_numeric(movies["endYear"], errors="coerce").astype("Int64")
+movies["endYear"]   = pd.to_numeric(movies["endYear"], errors="coerce").astype("Int64")
 movies["runtimeMinutes"] = pd.to_numeric(movies["runtimeMinutes"], errors="coerce")
-
-# Treat extreme/invalid runtimes as missing
 movies["runtimeMinutes"] = movies["runtimeMinutes"].mask(
     (movies["runtimeMinutes"] < RUNTIME_MIN) | (movies["runtimeMinutes"] > RUNTIME_MAX)
 )
-
-# Adult flag → int8
 movies["isAdult"] = movies["isAdult"].fillna(0).astype("int8")
-
-# Canonicalize genres (string column, not yet exploded)
 movies["genres"] = canonicalize_genres(movies["genres"])
 
-# title.ratings
 ratings = read_tsv(
     "title.ratings",
     usecols=REQUIRED["title.ratings"],
     dtype={"tconst":"string","averageRating":"float32","numVotes":"int32"}
 )
-
-# Merge ratings
 movies = movies.merge(ratings, on="tconst", how="left")
 
-# No ETL vote filter (let app control it)
 if MIN_VOTES > 0:
     movies = movies[movies["numVotes"].fillna(0) >= MIN_VOTES].copy()
 print(f"Movies after votes ≥ {MIN_VOTES}: {len(movies):,}")
 
-# title.principals (to link directors quickly)
 principals = read_tsv(
     "title.principals",
     usecols=REQUIRED["title.principals"],
@@ -126,27 +103,20 @@ principals = read_tsv(
 )
 dir_link = principals[principals["category"] == "director"][["tconst","nconst"]].copy()
 
-# name.basics (to get person names)
 names = read_tsv(
     "name.basics",
     usecols=REQUIRED["name.basics"],
     dtype={"nconst":"string","primaryName":"string","primaryProfession":"string","birthYear":"string"}
 )
-
 directors = dir_link.merge(names, on="nconst", how="left").rename(columns={"primaryName":"director"})
-
-# Aggregate possibly multiple directors per film
 directors_agg = (
-    directors
-    .dropna(subset=["director"])
-    .groupby("tconst", as_index=False)["director"]
-    .agg(lambda s: ", ".join(sorted(set(s))))
+    directors.dropna(subset=["director"])
+             .groupby("tconst", as_index=False)["director"]
+             .agg(lambda s: ", ".join(sorted(set(s))))
 )
-
-# Join directors into movies
 movies = movies.merge(directors_agg, on="tconst", how="left")
 
-# --- Regions & Languages from title.akas (optional UI filters) ---
+# Regions / Languages (optional)
 try:
     akas = read_tsv(
         "title.akas",
@@ -166,16 +136,13 @@ except FileNotFoundError:
     movies["languages"] = pd.NA
 
 # ---------- Explode genres & features ----------
-# For filtering/visuals we keep a per-genre row view
 movies["genres"] = movies["genres"].replace("", np.nan)
 movies["genres_list"] = movies["genres"].str.split(",")
 movies_exp = movies.explode("genres_list").rename(columns={"genres_list":"genre"})
 
-# decade bucket and weighted score (rating * log10(votes+1))
 movies_exp["decade"] = (movies_exp["startYear"] // 10 * 10).astype("Int64")
 movies_exp["weighted_score"] = movies_exp["averageRating"] * np.log10(movies_exp["numVotes"].fillna(0) + 1)
 
-# Reorder columns (and ensure presence)
 cols = [
     "tconst","primaryTitle","originalTitle","startYear","endYear","decade","runtimeMinutes","isAdult",
     "genre","genres","averageRating","numVotes","weighted_score","director","regions","languages"
@@ -184,10 +151,7 @@ for c in cols:
     if c not in movies_exp.columns:
         movies_exp[c] = pd.NA
 movies_exp = movies_exp[cols]
-
-# Light dtype shrinking
 movies_exp["isAdult"] = movies_exp["isAdult"].astype("int8")
-# keep Int64 for startYear/decade to preserve missing values
 
 # ---------- Save main table ----------
 out_path = OUT / "movies_clean.parquet"
@@ -223,7 +187,8 @@ agg_dec.to_parquet(agg_dec_path, index=False)
 print(f"Saved: {agg_year_path.resolve()}  ({len(agg_year):,} rows)")
 print(f"Saved: {agg_dec_path.resolve()}   ({len(agg_dec):,} rows)")
 
-# ---------- Build collaborations (director x actor) ----------
+
+# ---------- Collaborations (director × actor edges) ----------
 print("\nBuilding collaborations (edges only)...")
 movie_ids = set(movies["tconst"].unique())
 principals_small = principals[principals["tconst"].isin(movie_ids)].copy()

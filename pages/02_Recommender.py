@@ -1,88 +1,99 @@
-# pages/02_Recommender.py
+# recommender.py — Light, low‑memory KNN recommender (safe mode)
 import streamlit as st
-from utils import load_movies, filter_bar, build_rec_base, build_similarity_matrix
+import pandas as pd
+from pathlib import Path
+from sklearn.neighbors import NearestNeighbors
 
-st.set_page_config(page_title="IMDb Explorer — Recommender", page_icon="🎯", layout="wide")
-st.title("🎯 Recommender")
+from utils import load_movies_light, mem_mb
 
-# ----- Load + global filters (so recs match the same constraints app-wide) -----
-df = load_movies()
-d, f = filter_bar(df, key="recs")
+# ---------- Page config ----------
+st.set_page_config(page_title="IMDb Explorer — Recommender (Safe)", page_icon="🎯", layout="wide")
+st.title("🎯 Recommender (safe mode)")
 
 with st.popover("ℹ️ How it works"):
-    st.markdown("""
-**Method**
-- Build TF‑IDF features for **genres**, **director(s)**, and **decade** bucket.
-- Compute cosine similarity per space and combine:  
-  `Sim = w₁·Sim(genres) + w₂·Sim(director) + w₃·Sim(decade)`.
-- Rank by similarity, breaking ties by IMDb rating and votes.
+    st.markdown(
+        "This version avoids loading the full dataset. It builds a small feature matrix "
+        "from **genres (one‑hot)** + **average rating**, then uses a cosine **k‑NN** search. "
+        "Cap the pool size to keep RAM in check."
+    )
 
-**Tips**
-- Tighten matches by raising **Min rec votes** or upping **Director weight**.
-- Keep filters broad for more candidates; narrow years/genres to focus.
-""")
+# ---------- Controls ----------
+with st.expander("Settings", expanded=True):
+    min_votes = st.slider("Minimum votes", 1_000, 50_000, 10_000, step=1_000)
+    start_year = st.slider("Start year", 1900, 2025, 1970, step=5)
+    pool_max = st.slider("Max pool size (caps memory)", 2_000, 20_000, 8_000, step=1_000)
+    top_k = st.slider("Recommendations to show", 5, 30, 10)
 
-# ----- Controls -----
-colA, colB, colC, colD = st.columns([1.2, 1.2, 1.2, 1.2])
-min_rec_votes = colA.number_input("Min rec votes", 0, 2_000_000, max(2000, f["min_votes"]), 1000)
-w_genre = colB.slider("Genre weight", 0.0, 3.0, 2.0, 0.1)
-w_dir   = colC.slider("Director weight", 0.0, 3.0, 1.5, 0.1)
-w_dec   = colD.slider("Decade weight", 0.0, 2.0, 0.5, 0.1)
+# ---------- Load (light) ----------
+st.caption(f"RAM before load: {mem_mb()} MB")
+df = load_movies_light(min_votes=min_votes, start_year=start_year)
+if len(df) > pool_max:
+    # keep the most popular titles to limit memory
+    df = df.nlargest(pool_max, "numVotes")
 
-# ----- Build recommendation base from filtered data -----
-rec_base = build_rec_base(d, min_votes=min_rec_votes)
-if rec_base.empty:
-    st.info("No candidate titles under current filters. Broaden filters or lower Min rec votes.")
+st.caption(f"RAM after load (capped): {mem_mb()} MB | Pool: {len(df):,}")
+
+if df.empty:
+    st.info("No movies match the constraints. Loosen the sliders above.")
     st.stop()
 
-# ----- Similarity (cached) -----
-S = build_similarity_matrix(rec_base, w_genre=w_genre, w_dir=w_dir, w_decade=w_dec)
+# ---------- Features: genres one‑hot + rating ----------
+# Ensure 'genres' exists; fall back to empty string if not
+genres_oh = df.get("genres", pd.Series([""] * len(df))).str.get_dummies(sep=",")
+X = pd.concat([genres_oh, df[["averageRating"]]], axis=1).astype("float32")
 
-# ----- Pick a seed movie -----
-pick_from = rec_base.sort_values(["numVotes","averageRating"], ascending=False)["movie_key"].tolist()
-choice = st.selectbox("Pick a movie", pick_from, index=0)
-
-# ----- Compute top-N recommendations -----
-sel_idx = rec_base.index[rec_base["movie_key"] == choice][0]
-scores = S[sel_idx]
-
-order = scores.argsort()[::-1]
-order = [i for i in order if i != sel_idx][:10]
-recs = rec_base.iloc[order].copy()
-recs["similarity"] = scores[order]
-recs = recs.sort_values(["similarity","averageRating","numVotes"], ascending=[False,False,False])
-
-# ----- Show results -----
-show_cols = ["primaryTitle","startYear","genres","director","averageRating","numVotes","similarity"]
-st.dataframe(
-    recs[show_cols].rename(columns={
-        "primaryTitle":"Title","startYear":"Year","genres":"Genres",
-        "director":"Director(s)","averageRating":"IMDb Rating","numVotes":"Votes"
-    }),
-    use_container_width=True, height=520
+# ---------- Picker ----------
+# Order options by popularity for easier selection
+pick_from = (
+    df.sort_values(["numVotes", "averageRating"], ascending=False)
+      .assign(label=lambda x: x["primaryTitle"].fillna("Untitled") +
+                              " (" + x["startYear"].astype("Int64").astype(str).str.replace("<NA>", "?", regex=False) + ")")
 )
+choice = st.selectbox("Pick a movie", pick_from["label"].tolist(), index=0)
 
-st.download_button(
-    "⬇️ Download Recommendations (CSV)",
-    recs[["primaryTitle","startYear","genres","director","averageRating","numVotes","similarity"]]
-        .to_csv(index=False).encode(),
-    "recommendations.csv", "text/csv"
-)
+# Map choice to index
+sel_idx = pick_from.index[pick_from["label"] == choice][0]
 
-# ----- Filters caption (safe string join to avoid 'str is not callable') -----
-parts = [
-    f"Filters → Years {f['year_range'][0]}–{f['year_range'][1]} • ",
-    f"Min votes ≥ {f['min_votes']} • ",
-]
-if f["genres"]:
-    parts.append(f"Genres: {', '.join(f['genres'])} • ")
-parts.append("Adult included • " if f["include_adult"] else "Adult excluded • ")
-if f["regions"]:
-    parts.append(f"Regions: {', '.join(f['regions'])} • ")
-if f["languages"]:
-    parts.append(f"Languages: {', '.join(f['languages'])} • ")
-if f["q"]:
-    parts.append(f"Search: “{f['q']}”")
+# ---------- Run search ----------
+if st.button("Find similar", type="primary"):
+    st.caption(f"RAM before model: {mem_mb()} MB | Features: {X.shape[0]:,} × {X.shape[1]:,}")
+    nn = NearestNeighbors(n_neighbors=min(top_k + 1, len(df)), metric="cosine", algorithm="brute")
+    nn.fit(X)
+    dists, idxs = nn.kneighbors(X.iloc[[sel_idx]])
 
-st.caption("".join(parts))
+    # skip self (first hit)
+    nbr_idx = [i for i in idxs[0] if i != sel_idx][:top_k]
+    recs = df.iloc[nbr_idx].copy()
+    recs.insert(0, "similarity", (1.0 - pd.Series(dists[0], index=idxs[0]).loc[nbr_idx]).values)
+
+    # tidy view
+    view_cols = ["primaryTitle", "startYear", "averageRating", "numVotes"]
+    view = recs[view_cols].rename(columns={
+        "primaryTitle": "Title",
+        "startYear": "Year",
+        "averageRating": "IMDb",
+        "numVotes": "Votes",
+    })
+    st.caption(f"RAM after model: {mem_mb()} MB")
+
+    st.dataframe(
+        pd.concat([recs[["similarity"]].round(3), view], axis=1).reset_index(drop=True),
+        use_container_width=True, height=520,
+        column_config={
+            "similarity": st.column_config.NumberColumn("Sim", format="%.3f"),
+            "Year": st.column_config.NumberColumn(format="%d"),
+            "IMDb": st.column_config.NumberColumn(format="%.2f"),
+            "Votes": st.column_config.NumberColumn(format=",d"),
+        },
+    )
+
+    st.download_button(
+        "⬇️ Download Recommendations (CSV)",
+        recs.assign(similarity=recs["similarity"].round(6))[ ["similarity", "primaryTitle", "startYear", "averageRating", "numVotes"] ]
+            .rename(columns={"primaryTitle":"Title","startYear":"Year","averageRating":"IMDb","numVotes":"Votes"})
+            .to_csv(index=False).encode(),
+        file_name="recommendations_knn.csv",
+        mime="text/csv",
+    )
+
 st.caption("IMDb Explorer • Built with Streamlit • © Joshua Chua")
