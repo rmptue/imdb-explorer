@@ -61,12 +61,16 @@ if focus:
     agg = agg[agg["genre"].isin(focus)]
 
 # Pivot for heatmap
-pivot = (
-    agg.pivot_table(index=time_col, columns="genre", values=val_col, fill_value=0)
-      .sort_index()
-      .reindex(sorted(g for g in pivot.columns) if len(agg) else [], axis=1)
-    if not agg.empty else pd.DataFrame()
-)
+if agg.empty:
+    pivot = pd.DataFrame()
+else:
+    # compute desired column order BEFORE creating pivot
+    col_order = sorted(agg["genre"].dropna().unique().tolist())
+    pivot = (
+        agg.pivot_table(index=time_col, columns="genre", values=val_col, fill_value=0)
+           .sort_index()
+           .reindex(col_order, axis=1)
+    )
 
 # Normalize per row if requested
 if not pivot.empty and norm:
