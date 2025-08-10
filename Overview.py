@@ -53,34 +53,6 @@ except Exception as e:
 
 st.divider()
 
-# ============================================================
-# Section B: Year × Genre heatmap (pre-aggregated tiny parquet)
-# ============================================================
-try:
-    agg = load_agg_year_genre()  # expect columns: year, genre, count
-    req = {"year", "genre", "count"}
-    if not req.issubset(agg.columns):
-        missing = ", ".join(sorted(req - set(agg.columns)))
-        st.error(f"Pre-aggregate missing columns: {missing}")
-    else:
-        pivot = agg.pivot_table(index="year", columns="genre", values="count", fill_value=0)
-        st.caption(f"RAM before heatmap: {mem_mb()} MB")
-        # Quick preview table (last 10 years)
-        with st.expander("Preview year×genre counts (last 10 years)", expanded=False):
-            st.dataframe(pivot.tail(10), use_container_width=True)
-        # Optional heatmap using Plotly
-        pivot_reset = pivot.reset_index().melt(id_vars="year", var_name="genre", value_name="count")
-        fig_heat = px.density_heatmap(
-            pivot_reset, x="genre", y="year", z="count", nbinsx=len(pivot.columns), histfunc="sum",
-            title="Production volume by Year × Genre (pre-aggregated)",
-        )
-        fig_heat.update_yaxes(type="category", autorange="reversed")
-        st.plotly_chart(fig_heat, use_container_width=True)
-        st.caption(f"RAM after heatmap: {mem_mb()} MB")
-except Exception as e:
-    st.warning(f"Heatmap unavailable: {e}")
-
-st.divider()
 
 # ============================================================
 # Section C: Full interactive view (loads full exploded dataset)
