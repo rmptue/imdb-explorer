@@ -35,6 +35,23 @@ if out_dir.exists():
     files = [(p.name, p.stat().st_size) for p in out_dir.iterdir()]
     st.write("📄 Files in out/:", files)
 
+import psutil, os, streamlit as st, pandas as pd
+from pathlib import Path
+base = Path(__file__).resolve().parent
+
+def mem():
+    p = psutil.Process(os.getpid())
+    return round(p.memory_info().rss / (1024**2))  # MB
+
+st.write("✅ movies loaded")
+st.write("RAM now (MB):", mem())
+
+# TEMP: stop here to confirm no crash before charts/joins/pivots
+st.stop()
+
+
+
+
 
 
 # ----------------- Load data -----------------
