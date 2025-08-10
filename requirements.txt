@@ -7,3 +7,4 @@ networkx
 pyarrow
 duckdb
 polars
+psutil
