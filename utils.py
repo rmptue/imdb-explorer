@@ -94,7 +94,7 @@ def load_collab_edges() -> pd.DataFrame:
 @st.cache_data(show_spinner=False)
 def load_movies_light(
     min_votes: int = 10000,
-    start_year: int = 1970,
+    start_year: int = 1990,
     cols = ("tconst","primaryTitle","startYear","runtimeMinutes","genres","averageRating","numVotes","isAdult"),
 ) -> pd.DataFrame:
     """
@@ -187,7 +187,7 @@ def filter_bar(df: pd.DataFrame, *, key: str = "global"):
         c1, c2, c3, c4, c5 = st.columns([2, 1.6, 2, 1.4, 1.8])
 
         # Year range
-        y_min = int(df["startYear"].dropna().min()) if len(df) else 1900
+        y_min = int(df["startYear"].dropna().min()) if len(df) else 1990
         y_max = 2025
         year_range = c1.slider("Year", y_min, y_max, (max(1990, y_min), y_max), key=f"{key}_year")
 

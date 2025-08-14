@@ -12,7 +12,7 @@ import pandas as pd
 import numpy as np
 
 # ---------- Config ----------
-MIN_VOTES = 10000
+MIN_VOTES = 1
 RUNTIME_MIN = 100
 RUNTIME_MAX = 300
 
@@ -84,6 +84,10 @@ movies["runtimeMinutes"] = movies["runtimeMinutes"].mask(
 )
 movies["isAdult"] = movies["isAdult"].fillna(0).astype("int8")
 movies["genres"] = canonicalize_genres(movies["genres"])
+
+movies = movies[movies["startYear"].notna() & (movies["startYear"] >= 1990)]
+
+print(f"Movies after filtering by year ≥ 1990: {len(movies):,}")
 
 ratings = read_tsv(
     "title.ratings",
