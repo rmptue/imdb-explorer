@@ -12,8 +12,8 @@ import pandas as pd
 import numpy as np
 
 # ---------- Config ----------
-MIN_VOTES = 0
-RUNTIME_MIN = 1
+MIN_VOTES = 10000
+RUNTIME_MIN = 100
 RUNTIME_MAX = 300
 
 GENRE_MAP = {

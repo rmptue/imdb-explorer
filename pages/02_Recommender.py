@@ -83,7 +83,7 @@ if st.button("Find similar", type="primary"):
             "similarity": st.column_config.NumberColumn("Sim", format="%.3f"),
             "Year": st.column_config.NumberColumn(format="%d"),
             "IMDb": st.column_config.NumberColumn(format="%.2f"),
-            "Votes": st.column_config.NumberColumn(format=",d"),
+            "Votes": st.column_config.NumberColumn(format="%d"),
         },
     )
 

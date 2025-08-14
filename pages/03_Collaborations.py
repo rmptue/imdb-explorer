@@ -61,7 +61,7 @@ if st.button("Build network", type="primary"):
     st.dataframe(
         top_pairs,
         use_container_width=True,
-        column_config={"Films together": st.column_config.NumberColumn(format=",d")},
+        column_config={"Films together": st.column_config.NumberColumn(format="%d")},
         height=520,
     )
 
