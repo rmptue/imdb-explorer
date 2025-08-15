@@ -30,7 +30,7 @@ df = load_movies_light(min_votes=min_votes, start_year=start_year)
 if len(df) > pool_max:
     # keep the most popular titles to limit memory
     df = df.nlargest(pool_max, "numVotes")
-
+df = df.drop_duplicates("tconst").reset_index(drop=True)
 st.caption(f"RAM after load (capped): {mem_mb()} MB | Pool: {len(df):,}")
 
 if df.empty:
